@@ -1,0 +1,195 @@
+They accomplish the same thing as normal callbacks, but they have nicer syntax and can be chained and manipulated in a multitude of convenient ways. Callbacks work fine for simplistic cases, but if you need to make an asynchronous request that depends on the result of two other asynchronous requests of which one depends on yet another asynchronous request, promises are really good for maintaining your sanity. 
+
+Try using the fantastic library Q in your next project to feel the awesomeness:
+kriskowal/q
+
+
+A promise is an object returned by a module, library, function, that will be resolved or rejected some time in the future.
+
+That's the point: an object that will be resolved in the future. You can then use additional functions that will be executed once that promise is resolved (so, not now with your current code).
+
+It gives you a .then method, to which you can pass your callbacks, or functions that will be executed once the promise is resolved/rejected.
+
+You'd get a promise from some library that supports them simply by calling it. For example, popular `request` Node.js module has several promise-based versions. Here's one:
+request-promise
+
+You would use it like this:
+```javascript
+    var request = require('request-promise');
+    var promise = request('http:\/\/www.google.com/search?q=what is javascript promise');
+```
+Now you have a promise object.
+
+
+You can pass many callbacks (other functions) to it's .then() method. Each of those will be executed when Google responds to that query.
+
+One example of the passing that callback:
+```javascript
+    promise.then(function(response) {
+        console.log(response.body);
+    });
+```
+
+Repeat that (or pass another functions) as many times as you need. You can even pass the `promise` object to some other function or module which will also be able to attach listeners. 
+
+In browser, you'd, for example, use jQuery, it's implicitly taking a listener in it's `success` parameter of the $.ajax() method. (Note: jQuery includes a little off-standard implementation of promises.)
+
+Once the promise is resolved (ie. Google responds to that query), all those callbacks get executed, and they get the resolved value as a parameter.
+
+There's also a chance that the promise will be rejected, usually when there's an error or the input to your module is wrong. You can pass a callback for that case too, as a second parameter to the .then() method.
+
+Our example:
+```javascript
+    promise.then(null, function(error) {
+        console.log('There has been an error in the request: ', err);
+    });
+```
+
+Or pass both success and error handlers together:
+```javascript
+    promise.then(someFunction, someOtherFunction);
+```
+In the jQuery Ajax example, you pass a handler for rejected promise as `error` property.
+
+Full jQuery Ajax example would look like this:
+```javascript
+    $.ajax({
+        url: 'http:\/\/www.google.com/search?q=what is javascript promise',
+        type: 'GET',
+        success: function(data, status, xhr) {
+            alert('Response from Google: ' + data.toString());
+        },
+        error: function(xhr, status, error) {
+            alert('Error in request ' + error && error.toString());
+        }
+    });
+```
+
+You have a .success and .error, which are handlers for resolved and rejected promise in turn. As you see, not a typical implementation, in some ways different (you only pass one callback, and you have to do it right away).
+
+There's a chance that your promise is never going to be resolved or rejected. In that case, your handlers will never be called. You might want to cover this case with some timeout or a similar function. Some modules, like request, have a built-in timeouts.
+
+
+You can also make your own function, module or library use a promise. It would be easier to use native promises in browsers or environment when you can, or when you cannot, use a polyfil or a promise library, like `bluebird` or `q`.
+
+But let's say you want to do it on your own, for learning purposes.
+
+Here's how you would start:
+
+```javascript   
+function promiseBasedSave(inputData) {
+        // FIRST: you need to setup some state.
+        var state = 'pending';
+        var callbacks = [];
+        var errorCallbacks = [];
+        var value; // this is what we will finally resolve
+        var error; // if any
+        var promise = {
+            then: function(callback, errorCallback) {
+                // you need to save the callback, the error callback
+                // also, you need to call them if the promise is already resolved
+                if(typeof callback === 'function') {
+                    callbacks.push(callback);
+                }
+                if(typeof errorCallback === 'function') {
+                    errorCallbacks.push(errorCallback);
+                }
+                // there's a chance that the promise is already resolved.
+                in that case, schedule the callbacks for execution immediately.
+                if(state === 'resolved' && typeof callback === 'function') {
+                    // pass the value to the callback.
+                    callback(value);
+                }
+                if(state === 'rejected' && typeof errorCallback === 'function') {
+                    errorCallback(error);
+                }
+            }
+        };
+ 
+        // SECOND: do some action (computation, maybe something async
+        // like fetching data from google etc
+        // for example, I'll save the params to some async storage like
+        // a database or localStorage
+        // let's assume this storage works in a regular, callback way
+        // it will return to us an error, if any, or a response when saving went
+        // well
+        storage.save(inputData, function(err, response) {
+            if(err) {
+                // when errors, we'll need to resolve our error callbacks
+                state = 'rejected';
+                errorCallbacks.forEach(function(errorCb) {
+                    // we would have to surround this with try/catch so that
+                    // we ensure that all callbacks get called
+                    try {
+                        errorCb(error);
+                    } catch(e) {
+                        // ignore
+                    }
+                });
+            } else {
+                // the other is a success branch. Let's say we have a response
+                // but our Library only returns an `id` field from the database.
+                // we store it as our promise value.
+                value = response && Page on Page on response.id;
+                callbacks.forEach(function(callback) {
+                    // again, ensure that all callbacks get called
+                    try {
+                        callback(value)
+                    } catch(e) {
+                        // ignore
+                    }
+                });
+            }
+        });
+        // THIRD: return our promise.
+        return promise;
+    }
+
+```
+Note: this is a crude version, with possible problems but we're keeping it simple.
+
+Now, if you analyse the code, we have three stages:
+- setup the initial empty state and create the .then handler
+- do our computation or action that we're designing in the first place
+- return the created .then handler.
+
+So, you would get that inner promise object by calling the lib:
+```javascript
+    var defered = promiseBasedSave({name: 'John Doe'});
+```
+Let's assume you setup a callback on it immediatelly. Pass it two funcitons.
+```javascript
+    defered.then(
+        function successHandler(id) {
+            console.log('Object saved, with id: ', id);
+        },
+        function errorHandler(error) {
+            console.log('Error saving object: ', error);
+    })
+;
+```
+So whenever the object gets stored to the storage, our callbacks will be called. Which one, well, there's a hint in their names.
+
+Let's say save is successful. Your successHandler gets called, and promise's inner state is 'resolved', and some `id` is stored in value variable. It's all hanging in a closure.
+
+But you might have saved the `defered` object for later, and when you call it later, you still get stuff done.
+
+Remember the check if the state is resolved in the .then() handler? That's what is going to happen.
+
+Also, we used `setImmediate` above in , because maybe you need to setup something else here before you finish, in the current tick.
+
+Now, promises can also stack. Meaning, a promise value can be another promise. You can then stack a then method to it.
+```javascript
+For example:
+getSomeDataFromGoogle()
+.then(getSomeThingFromTwitter())
+.then(saveSomethingToStorage())
+.then(displayInfoToUsers(),
+    function errorHandler(err) {
+        console.log('You only need to handle error this once in the whole chain.');
+});
+```
+
+That's a better part of promises and where they're very useful.
+
+    
